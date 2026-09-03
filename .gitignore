@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.env*
+!.env.example
+data/*.db
+data/*.db-*
+generated/*
+!generated/.gitkeep
+!templates/.gitkeep
+npm-debug.log*
+.DS_Store
