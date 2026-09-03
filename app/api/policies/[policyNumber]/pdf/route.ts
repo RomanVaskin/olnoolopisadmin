@@ -4,7 +4,11 @@ import path from "node:path";
 import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
-export async function GET(_request: Request, { params }: { params: Promise<{ policyNumber: string }> }) {
+const API_KEY = process.env.SPORTPOLIS_POLICY_API_KEY;
+function authorized(request: Request): boolean { return !API_KEY || request.headers.get("x-api-key") === API_KEY; }
+
+export async function GET(request: Request, { params }: { params: Promise<{ policyNumber: string }> }) {
+  if (!authorized(request)) return NextResponse.json({ error: "Неверный API-ключ" }, { status: 401 });
   const { policyNumber } = await params;
   const policy = db.prepare("SELECT policy_number, status, pdf_path FROM policy_numbers WHERE policy_number = ?").get(policyNumber) as { policy_number: string; status: string; pdf_path: string | null } | undefined;
   if (!policy || policy.status !== "issued" || !policy.pdf_path) return NextResponse.json({ error: "Выпущенный полис с PDF не найден" }, { status: 404 });

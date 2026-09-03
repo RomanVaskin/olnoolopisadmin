@@ -20,8 +20,8 @@ export interface GenerateVkPolicyInput {
   policyStartDate: string;
   policyEndDate: string;
   participant: VkParticipant;
-  sport: string;
-  insuranceAmount: number;
+  sport?: string;
+  insuranceAmount?: number;
   premium?: number;
 }
 
@@ -88,7 +88,7 @@ function drawFallback(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyIn
 
 function fillFormIfPresent(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyInput): boolean {
   const form = pdf.getForm(); if (form.getFields().length === 0) return false;
-  const values: Record<string, string> = { policyNumber: input.policyNumber, policyDate: input.policyDate, policyStartDate: input.policyStartDate, policyEndDate: input.policyEndDate, participantName: participantName(input.participant), birthDate: input.participant.birthDate, passport: `${input.participant.passportSeries} ${input.participant.passportNumber}`, sport: input.sport, insuranceAmount: String(input.insuranceAmount), premium: String(input.premium), paymentDeadline: input.policyDate };
+  const values: Record<string, string> = { policyNumber: input.policyNumber, policyDate: input.policyDate, policyStartDate: input.policyStartDate, policyEndDate: input.policyEndDate, participantName: participantName(input.participant), birthDate: input.participant.birthDate, passport: `${input.participant.passportSeries} ${input.participant.passportNumber}`, sport: input.sport ?? "", insuranceAmount: String(input.insuranceAmount ?? 0), premium: String(input.premium), paymentDeadline: input.policyDate };
   let filled = 0;
   for (const [key, aliases] of Object.entries(FIELD_ALIASES)) for (const name of aliases) { try { form.getTextField(name).setText(values[key]); filled++; break; } catch { /* alias absent */ } }
   if (filled > 0) { form.updateFieldAppearances(font); form.flatten(); }
@@ -96,7 +96,7 @@ function fillFormIfPresent(pdf: PDFDocument, font: PDFFont, input: GenerateVkPol
 }
 
 export async function generateVkPolicy(rawInput: GenerateVkPolicyInput): Promise<PolicyGenerationResult> {
-  const input: GenerateVkPolicyInput = { ...rawInput, premium: rawInput.premium ?? DEFAULT_PREMIUM };
+  const input: GenerateVkPolicyInput = { ...rawInput, premium: rawInput.premium ?? DEFAULT_PREMIUM, sport: rawInput.sport ?? "", insuranceAmount: rawInput.insuranceAmount ?? 0 };
   const policyNumber = safePolicyNumber(input.policyNumber);
   const templatePath = path.join(process.cwd(), "templates", "vk.pdf");
   try { await fs.access(templatePath); } catch { throw new Error(`Не найден PDF-шаблон: ${templatePath}`); }
