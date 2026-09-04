@@ -95,7 +95,7 @@ const VK_COORDINATES = {
   },
   page2: {
     firstRow: {
-      fullName: { x: 45, y: 700, size: 7 },
+      fullName: { x: 45, y: 706, size: 7, lineHeight: 8 },
       birthDate: { x: 143, y: 700, size: 7 },
       insuranceStart: { x: 307, y: 711, size: 7 },
       insuranceEnd: { x: 307, y: 703, size: 7 },
@@ -132,7 +132,8 @@ function drawFallback(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyIn
   if (pdf.getPageCount() < 2) return;
   const page2 = pdf.getPage(1);
   const { fullName, birthDate, insuranceStart, insuranceEnd } = VK_COORDINATES.page2.firstRow;
-  page2.drawText(participantName(input.participant), { ...fullName, font, color: TEMPLATE_TEXT_COLOR });
+  const participantNameLines = [input.participant.lastName, [input.participant.firstName, input.participant.middleName].filter(Boolean).join(" ")].join("\n");
+  page2.drawText(participantNameLines, { ...fullName, font, color: TEMPLATE_TEXT_COLOR });
   page2.drawText(input.participant.birthDate, { ...birthDate, font, color: TEMPLATE_TEXT_COLOR });
   page2.drawText(input.policyStartDate, { ...insuranceStart, font, color: TEMPLATE_TEXT_COLOR });
   page2.drawText(input.policyEndDate, { ...insuranceEnd, font, color: TEMPLATE_TEXT_COLOR });
