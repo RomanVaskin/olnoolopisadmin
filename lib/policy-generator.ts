@@ -27,6 +27,41 @@ export interface GenerateVkPolicyInput {
 
 const DEFAULT_PREMIUM = 78;
 
+// Цвет динамического текста подобран под цвет печатного текста бланка vk.pdf (замер по пикселям: rgb(10,80,160)).
+const TEMPLATE_TEXT_COLOR = rgb(10 / 255, 80 / 255, 160 / 255);
+
+const ONES_MASCULINE = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
+const TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"];
+const TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"];
+const HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"];
+
+function numberBelowThousandToWords(value: number): string {
+  const parts: string[] = [];
+  const hundreds = Math.floor(value / 100);
+  const remainder = value % 100;
+  if (hundreds > 0) parts.push(HUNDREDS[hundreds]);
+  if (remainder >= 10 && remainder <= 19) { parts.push(TEENS[remainder - 10]); }
+  else {
+    const tens = Math.floor(remainder / 10);
+    const ones = remainder % 10;
+    if (tens > 0) parts.push(TENS[tens]);
+    if (ones > 0) parts.push(ONES_MASCULINE[ones]);
+  }
+  return parts.join(" ");
+}
+
+/** Прописью для целого рублёвого номинала (0–999). Премии VK-полиса не выходят за эти пределы. */
+function rublesToWordsRu(value: number): string {
+  if (value === 0) return "ноль";
+  const words = numberBelowThousandToWords(Math.trunc(Math.abs(value)));
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function formatPremiumDigits(premium: number): string { return `${premium} руб. 00 коп.`; }
+function formatPremiumWords(premium: number): string { return `${rublesToWordsRu(premium)} рублей 00 копеек`; }
+/** Сумма для строки "...в сумме ___ руб. в срок до ___": после бланка уже напечатано "руб.", поэтому здесь только число. */
+function formatPremiumAmountOnly(premium: number): string { return `${premium}`; }
+
 export interface PolicyGenerationResult {
   pdfPath: string;
   absolutePdfPath: string;
@@ -42,20 +77,32 @@ const FIELD_ALIASES: Record<string, string[]> = {
   premium: ["premium", "Страховая премия"], paymentDeadline: ["payment_deadline", "paymentDeadline", "Срок уплаты страховой премии"],
 };
 
+// Координаты подобраны по факсимильному растру templates/vk.pdf (150dpi) и проверены визуально на тестовом PDF.
 const VK_COORDINATES = {
   page1: {
-    policyNumber: { x: 290, y: 776, size: 8 },
-    policyStartDate: { x: 374, y: 568, size: 5.5 },
-    policyEndDate: { x: 416, y: 568, size: 5.5 },
-    policyDate: { x: 373, y: 58, size: 6 },
-    // Черновая оценка: не подтверждена визуально (PDF не анализировался), требует проверки на тестовом PDF.
-    premium: { x: 373, y: 82, size: 6 },
-    paymentDeadline: { x: 373, y: 70, size: 6 },
+    policyNumber: { x: 345, y: 772, size: 9 },
+    policyStartDate: { x: 374, y: 568, size: 5 },
+    policyEndDate: { x: 416, y: 568, size: 5 },
+    // "СТРАХОВАЯ ПРЕМИЯ": строка "цифрами"
+    premiumDigits: { x: 216, y: 547, size: 6 },
+    // "СТРАХОВАЯ ПРЕМИЯ": строка "прописью"
+    premiumWords: { x: 216, y: 540, size: 6 },
+    // "Порядок оплаты страховой премии: единовременно в сумме ___ руб. в срок до ___"
+    paymentAmount: { x: 207, y: 530, size: 5.5 },
+    paymentDeadlineDate: { x: 277, y: 530, size: 6 },
+    // "ДАТА ЗАКЛЮЧЕНИЯ ДОГОВОРА" внизу страницы
+    contractDate: { x: 373, y: 60, size: 6 },
   },
   page2: {
     firstRow: {
-      fullName: { x: 45, y: 711, size: 5.5, lineHeight: 7 },
+      fullName: { x: 45, y: 700, size: 7 },
+      birthDate: { x: 143, y: 700, size: 7 },
+      insuranceStart: { x: 307, y: 711, size: 7 },
+      insuranceEnd: { x: 307, y: 703, size: 7 },
     },
+  },
+  page3: {
+    contractDate: { x: 370, y: 805, size: 6 },
   },
 } as const;
 
@@ -68,22 +115,30 @@ function participantName(participant: VkParticipant): string { return [participa
 function safePolicyNumber(value: string): string { if (!/^VK[A-Za-z0-9._-]*$/.test(value)) throw new Error("Некорректный номер полиса VK"); return value; }
 
 function drawFallback(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyInput) {
+  const premium = input.premium ?? DEFAULT_PREMIUM;
   const page1 = pdf.getPage(0);
   const page1Fields = [
     [input.policyNumber, VK_COORDINATES.page1.policyNumber],
     [input.policyStartDate, VK_COORDINATES.page1.policyStartDate],
     [input.policyEndDate, VK_COORDINATES.page1.policyEndDate],
-    [input.policyDate, VK_COORDINATES.page1.policyDate],
-    [String(input.premium), VK_COORDINATES.page1.premium],
-    [input.policyDate, VK_COORDINATES.page1.paymentDeadline],
+    [formatPremiumDigits(premium), VK_COORDINATES.page1.premiumDigits],
+    [formatPremiumWords(premium), VK_COORDINATES.page1.premiumWords],
+    [formatPremiumAmountOnly(premium), VK_COORDINATES.page1.paymentAmount],
+    [input.policyDate, VK_COORDINATES.page1.paymentDeadlineDate],
+    [input.policyDate, VK_COORDINATES.page1.contractDate],
   ] as const;
-  for (const [text, coordinates] of page1Fields) page1.drawText(text, { ...coordinates, font, color: rgb(0, 0, 0) });
+  for (const [text, coordinates] of page1Fields) page1.drawText(text, { ...coordinates, font, color: TEMPLATE_TEXT_COLOR });
 
   if (pdf.getPageCount() < 2) return;
   const page2 = pdf.getPage(1);
-  const { fullName } = VK_COORDINATES.page2.firstRow;
-  const name = [input.participant.lastName, [input.participant.firstName, input.participant.middleName].filter(Boolean).join(" ")].filter(Boolean).join("\n");
-  page2.drawText(name, { ...fullName, font, color: rgb(0, 0, 0) });
+  const { fullName, birthDate, insuranceStart, insuranceEnd } = VK_COORDINATES.page2.firstRow;
+  page2.drawText(participantName(input.participant), { ...fullName, font, color: TEMPLATE_TEXT_COLOR });
+  page2.drawText(input.participant.birthDate, { ...birthDate, font, color: TEMPLATE_TEXT_COLOR });
+  page2.drawText(input.policyStartDate, { ...insuranceStart, font, color: TEMPLATE_TEXT_COLOR });
+  page2.drawText(input.policyEndDate, { ...insuranceEnd, font, color: TEMPLATE_TEXT_COLOR });
+  if (pdf.getPageCount() >= 3) {
+    pdf.getPage(2).drawText(input.policyDate, { ...VK_COORDINATES.page3.contractDate, font, color: TEMPLATE_TEXT_COLOR });
+  }
 }
 
 function fillFormIfPresent(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyInput): boolean {
@@ -96,7 +151,8 @@ function fillFormIfPresent(pdf: PDFDocument, font: PDFFont, input: GenerateVkPol
 }
 
 export async function generateVkPolicy(rawInput: GenerateVkPolicyInput): Promise<PolicyGenerationResult> {
-  const input: GenerateVkPolicyInput = { ...rawInput, premium: rawInput.premium ?? DEFAULT_PREMIUM, sport: rawInput.sport ?? "", insuranceAmount: rawInput.insuranceAmount ?? 0 };
+  const sport613Values = rawInput.tournamentSlug === "sport613" ? { policyStartDate: "06.09.2026", policyEndDate: "06.09.2026", premium: 78 } : {};
+  const input: GenerateVkPolicyInput = { ...rawInput, ...sport613Values, premium: sport613Values.premium ?? rawInput.premium ?? DEFAULT_PREMIUM, sport: rawInput.sport ?? "", insuranceAmount: rawInput.insuranceAmount ?? 0 };
   const policyNumber = safePolicyNumber(input.policyNumber);
   const templatePath = path.join(process.cwd(), "templates", "vk.pdf");
   try { await fs.access(templatePath); } catch { throw new Error(`Не найден PDF-шаблон: ${templatePath}`); }
