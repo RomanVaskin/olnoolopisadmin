@@ -15,9 +15,9 @@ import {
   LogOut,
   Menu,
   X,
-  ShieldHalf,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { BrandLogo } from '@/components/brand-logo'
 
 const nav = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -36,16 +36,8 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col">
       {/* Wordmark */}
-      <div className="flex items-center gap-2.5 px-6 py-6">
-        <span className="flex size-8 items-center justify-center rounded-md bg-foreground text-background">
-          <ShieldHalf className="size-4.5" />
-        </span>
-        <div className="leading-none">
-          <div className="text-sm font-semibold tracking-tight">OLNOO</div>
-          <div className="mt-1 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-            Insurance
-          </div>
-        </div>
+      <div className="px-6 py-6">
+        <BrandLogo height={20} />
       </div>
 
       {/* Nav */}
@@ -109,12 +101,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
       {/* Mobile top bar */}
       <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-background/90 px-4 backdrop-blur lg:hidden">
-        <div className="flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
-            <ShieldHalf className="size-4" />
-          </span>
-          <span className="text-sm font-semibold tracking-tight">OLNOO</span>
-        </div>
+        <BrandLogo height={16} showLabel={false} />
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
