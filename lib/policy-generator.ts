@@ -23,6 +23,8 @@ export interface GenerateVkPolicyInput {
   sport?: string;
   insuranceAmount?: number;
   premium?: number;
+  /** Имя файла PDF в каталоге generated/. По умолчанию `${policyNumber}.pdf`. Нужно, когда несколько заявок используют один и тот же номер полиса (sport613). */
+  pdfFileName?: string;
 }
 
 const DEFAULT_PREMIUM = 78;
@@ -30,37 +32,10 @@ const DEFAULT_PREMIUM = 78;
 // Цвет динамического текста подобран под цвет печатного текста бланка vk.pdf (замер по пикселям: rgb(10,80,160)).
 const TEMPLATE_TEXT_COLOR = rgb(10 / 255, 80 / 255, 160 / 255);
 
-const ONES_MASCULINE = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"];
-const TEENS = ["десять", "одиннадцать", "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"];
-const TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"];
-const HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"];
-
-function numberBelowThousandToWords(value: number): string {
-  const parts: string[] = [];
-  const hundreds = Math.floor(value / 100);
-  const remainder = value % 100;
-  if (hundreds > 0) parts.push(HUNDREDS[hundreds]);
-  if (remainder >= 10 && remainder <= 19) { parts.push(TEENS[remainder - 10]); }
-  else {
-    const tens = Math.floor(remainder / 10);
-    const ones = remainder % 10;
-    if (tens > 0) parts.push(TENS[tens]);
-    if (ones > 0) parts.push(ONES_MASCULINE[ones]);
-  }
-  return parts.join(" ");
-}
-
-/** Прописью для целого рублёвого номинала (0–999). Премии VK-полиса не выходят за эти пределы. */
-function rublesToWordsRu(value: number): string {
-  if (value === 0) return "ноль";
-  const words = numberBelowThousandToWords(Math.trunc(Math.abs(value)));
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-function formatPremiumDigits(premium: number): string { return `${premium} руб. 00 коп.`; }
-function formatPremiumWords(premium: number): string { return `${rublesToWordsRu(premium)} рублей 00 копеек`; }
-/** Сумма для строки "...в сумме ___ руб. в срок до ___": после бланка уже напечатано "руб.", поэтому здесь только число. */
-function formatPremiumAmountOnly(premium: number): string { return `${premium}`; }
+// Фон ячеек templates/vk.pdf: RGB (242, 242, 242), измерен по растру второй страницы.
+const PREMIUM_MASK_COLOR = rgb(242 / 255, 242 / 255, 242 / 255);
+// Отдельные маски значений сохраняют заголовок и границы всех 20 строк таблицы.
+const PREMIUM_VALUE_MASK = { x: 545, y: 698, width: 23, height: 12, rowStep: 31.547, rowCount: 20 } as const;
 
 export interface PolicyGenerationResult {
   pdfPath: string;
@@ -74,7 +49,7 @@ const FIELD_ALIASES: Record<string, string[]> = {
   policyStartDate: ["policy_start_date", "policyStartDate", "Дата начала"], policyEndDate: ["policy_end_date", "policyEndDate", "Дата окончания"],
   participantName: ["participant_name", "participantName", "ФИО"], birthDate: ["birth_date", "birthDate", "Дата рождения"],
   passport: ["passport", "Паспорт"], sport: ["sport", "Вид спорта"], insuranceAmount: ["insurance_amount", "insuranceAmount", "Страховая сумма"],
-  premium: ["premium", "Страховая премия"], paymentDeadline: ["payment_deadline", "paymentDeadline", "Срок уплаты страховой премии"],
+  paymentDeadline: ["payment_deadline", "paymentDeadline", "Срок уплаты страховой премии"],
 };
 
 // Координаты подобраны по факсимильному растру templates/vk.pdf (150dpi) и проверены визуально на тестовом PDF.
@@ -83,12 +58,9 @@ const VK_COORDINATES = {
     policyNumber: { x: 345, y: 772, size: 9 },
     policyStartDate: { x: 374, y: 568, size: 5 },
     policyEndDate: { x: 416, y: 568, size: 5 },
-    // "СТРАХОВАЯ ПРЕМИЯ": строка "цифрами"
-    premiumDigits: { x: 216, y: 547, size: 6 },
-    // "СТРАХОВАЯ ПРЕМИЯ": строка "прописью"
-    premiumWords: { x: 216, y: 540, size: 6 },
+    // "СТРАХОВАЯ ПРЕМИЯ" (цифрами/прописью) на первом листе не печатается.
     // "Порядок оплаты страховой премии: единовременно в сумме ___ руб. в срок до ___"
-    paymentAmount: { x: 207, y: 530, size: 5.5 },
+    // Динамическая сумма не выводится; текст строки остаётся в шаблоне.
     paymentDeadlineDate: { x: 277, y: 530, size: 6 },
     // "ДАТА ЗАКЛЮЧЕНИЯ ДОГОВОРА" внизу страницы
     contractDate: { x: 373, y: 60, size: 6 },
@@ -113,17 +85,15 @@ async function loadFont(): Promise<Uint8Array> {
 
 function participantName(participant: VkParticipant): string { return [participant.lastName, participant.firstName, participant.middleName].filter(Boolean).join(" "); }
 function safePolicyNumber(value: string): string { if (!/^VK[A-Za-z0-9._-]*$/.test(value)) throw new Error("Некорректный номер полиса VK"); return value; }
+function safePdfFileName(value: string): string { if (!/^[A-Za-z0-9._-]+\.pdf$/.test(value)) throw new Error("Некорректное имя файла PDF"); return value; }
 
 function drawFallback(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyInput) {
-  const premium = input.premium ?? DEFAULT_PREMIUM;
   const page1 = pdf.getPage(0);
   const page1Fields = [
     [input.policyNumber, VK_COORDINATES.page1.policyNumber],
     [input.policyStartDate, VK_COORDINATES.page1.policyStartDate],
     [input.policyEndDate, VK_COORDINATES.page1.policyEndDate],
-    [formatPremiumDigits(premium), VK_COORDINATES.page1.premiumDigits],
-    [formatPremiumWords(premium), VK_COORDINATES.page1.premiumWords],
-    [formatPremiumAmountOnly(premium), VK_COORDINATES.page1.paymentAmount],
+    // Страховая премия (цифрами/прописью) на первом листе не выводится.
     [input.policyDate, VK_COORDINATES.page1.paymentDeadlineDate],
     [input.policyDate, VK_COORDINATES.page1.contractDate],
   ] as const;
@@ -144,7 +114,7 @@ function drawFallback(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyIn
 
 function fillFormIfPresent(pdf: PDFDocument, font: PDFFont, input: GenerateVkPolicyInput): boolean {
   const form = pdf.getForm(); if (form.getFields().length === 0) return false;
-  const values: Record<string, string> = { policyNumber: input.policyNumber, policyDate: input.policyDate, policyStartDate: input.policyStartDate, policyEndDate: input.policyEndDate, participantName: participantName(input.participant), birthDate: input.participant.birthDate, passport: `${input.participant.passportSeries} ${input.participant.passportNumber}`, sport: input.sport ?? "", insuranceAmount: String(input.insuranceAmount ?? 0), premium: String(input.premium), paymentDeadline: input.policyDate };
+  const values: Record<string, string> = { policyNumber: input.policyNumber, policyDate: input.policyDate, policyStartDate: input.policyStartDate, policyEndDate: input.policyEndDate, participantName: participantName(input.participant), birthDate: input.participant.birthDate, passport: `${input.participant.passportSeries} ${input.participant.passportNumber}`, sport: input.sport ?? "", insuranceAmount: String(input.insuranceAmount ?? 0), paymentDeadline: input.policyDate };
   let filled = 0;
   for (const [key, aliases] of Object.entries(FIELD_ALIASES)) for (const name of aliases) { try { form.getTextField(name).setText(values[key]); filled++; break; } catch { /* alias absent */ } }
   if (filled > 0) { form.updateFieldAppearances(font); form.flatten(); }
@@ -161,9 +131,16 @@ export async function generateVkPolicy(rawInput: GenerateVkPolicyInput): Promise
   if (pdf.getPageCount() === 0) throw new Error("PDF-шаблон VK не содержит страниц");
   pdf.registerFontkit(fontkit); const font = await pdf.embedFont(await loadFont(), { subset: true });
   if (!fillFormIfPresent(pdf, font, input)) drawFallback(pdf, font, input);
+  if (pdf.getPageCount() >= 2) {
+    const { x, y, width, height, rowStep, rowCount } = PREMIUM_VALUE_MASK;
+    for (let row = 0; row < rowCount; row++) {
+      pdf.getPage(1).drawRectangle({ x, y: y - row * rowStep, width, height, color: PREMIUM_MASK_COLOR });
+    }
+  }
   pdf.setTitle(`Полис ${policyNumber}`); pdf.setSubject(`VK, заявка ${input.applicationId}, турнир ${input.tournamentSlug}`);
+  const fileName = safePdfFileName(input.pdfFileName ?? `${policyNumber}.pdf`);
   const generatedDir = path.join(process.cwd(), "generated"); await fs.mkdir(generatedDir, { recursive: true });
-  const absolutePdfPath = path.join(generatedDir, `${policyNumber}.pdf`); const temporaryPath = `${absolutePdfPath}.${process.pid}.tmp`;
+  const absolutePdfPath = path.join(generatedDir, fileName); const temporaryPath = `${absolutePdfPath}.${process.pid}.tmp`;
   await fs.writeFile(temporaryPath, await pdf.save()); await fs.rename(temporaryPath, absolutePdfPath);
-  return { pdfPath: path.posix.join("generated", `${policyNumber}.pdf`), absolutePdfPath, generatedAt: new Date().toISOString() };
+  return { pdfPath: path.posix.join("generated", fileName), absolutePdfPath, generatedAt: new Date().toISOString() };
 }

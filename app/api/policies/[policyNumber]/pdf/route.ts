@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { db } from "@/lib/db";
+import { SPORT613_VK_POLICY_NUMBER, sport613VkPdfFileName } from "@/lib/issue-policy";
 
 export const runtime = "nodejs";
 const API_KEY = process.env.SPORTPOLIS_POLICY_API_KEY;
@@ -10,6 +11,18 @@ function authorized(request: Request): boolean { return !API_KEY || request.head
 export async function GET(request: Request, { params }: { params: Promise<{ policyNumber: string }> }) {
   if (!authorized(request)) return NextResponse.json({ error: "Неверный API-ключ" }, { status: 401 });
   const { policyNumber } = await params;
+
+  if (policyNumber === SPORT613_VK_POLICY_NUMBER) {
+    const applicationId = new URL(request.url).searchParams.get("applicationId");
+    if (!applicationId) return NextResponse.json({ error: "Не указан applicationId" }, { status: 400 });
+    let fileName: string;
+    try { fileName = sport613VkPdfFileName(applicationId); }
+    catch { return NextResponse.json({ error: "Некорректный applicationId" }, { status: 400 }); }
+    const filePath = path.join(process.cwd(), "generated", fileName);
+    try { const file = await fs.readFile(filePath); return new NextResponse(file, { headers: { "content-type": "application/pdf", "content-disposition": `attachment; filename="${fileName}"`, "cache-control": "private, no-store" } }); }
+    catch { return NextResponse.json({ error: "PDF-файл отсутствует" }, { status: 404 }); }
+  }
+
   const policy = db.prepare("SELECT policy_number, status, pdf_path FROM policy_numbers WHERE policy_number = ?").get(policyNumber) as { policy_number: string; status: string; pdf_path: string | null } | undefined;
   if (!policy || policy.status !== "issued" || !policy.pdf_path) return NextResponse.json({ error: "Выпущенный полис с PDF не найден" }, { status: 404 });
   if (!/^VK[A-Za-z0-9._-]*$/.test(policy.policy_number)) return NextResponse.json({ error: "Некорректный номер полиса" }, { status: 400 });
