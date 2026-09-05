@@ -25,7 +25,7 @@ async function issueSport613VkPolicy(input: IssueVkPolicyInput): Promise<IssuePo
   return {
     policyNumber: SPORT613_VK_POLICY_NUMBER,
     status: "issued",
-    pdfPath: `/api/policies/${encodeURIComponent(SPORT613_VK_POLICY_NUMBER)}/pdf?applicationId=${encodeURIComponent(input.applicationId)}`,
+    pdfPath: `/sportpolis/api/policies/${encodeURIComponent(SPORT613_VK_POLICY_NUMBER)}/pdf?applicationId=${encodeURIComponent(input.applicationId)}`,
   };
 }
 
@@ -36,12 +36,12 @@ export async function issueVkPolicy(input: IssueVkPolicyInput): Promise<IssuePol
   if (policy.status === "issued") {
     if (!policy.pdf_path) throw new Error("Полис выпущен, но путь к PDF отсутствует");
     await fs.access(path.join(process.cwd(), "generated", `${policy.policy_number}.pdf`));
-    return { policyNumber: policy.policy_number, status: "issued", pdfPath: `/api/policies/${encodeURIComponent(policy.policy_number)}/pdf` };
+    return { policyNumber: policy.policy_number, status: "issued", pdfPath: `/sportpolis/api/policies/${encodeURIComponent(policy.policy_number)}/pdf` };
   }
   try {
     const generated = await generateVkPolicy({ ...input, policyNumber: policy.policy_number });
     markPolicyNumberIssued(policy.policy_number, generated.pdfPath);
-    return { policyNumber: policy.policy_number, status: "issued", pdfPath: `/api/policies/${encodeURIComponent(policy.policy_number)}/pdf` };
+    return { policyNumber: policy.policy_number, status: "issued", pdfPath: `/sportpolis/api/policies/${encodeURIComponent(policy.policy_number)}/pdf` };
   } catch (error) {
     releasePolicyNumber(policy.policy_number);
     await fs.unlink(path.join(process.cwd(), "generated", `${policy.policy_number}.pdf`)).catch(() => undefined);
